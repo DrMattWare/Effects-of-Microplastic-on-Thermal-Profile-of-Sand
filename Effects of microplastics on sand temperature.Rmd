@@ -1,0 +1,1024 @@
+---
+title: "Effects of Microplastics on Sand Temperature"
+author: "Valencia Beckwith, Dr. Mariana Fuentes, and Dr. Matt Ware"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: journal
+    toc: true
+    toc_depth: 4
+    number_sections: true
+    toc_float: true
+  pdf_document:
+    toc: true
+    toc_depth: 4
+    number_sections: true
+geometry: margin=1in 
+always_allow_html: true
+urlcolor: blue
+---
+
+```{r setup, include = FALSE}
+
+knitr::opts_chunk$set(echo = FALSE)
+
+```
+```{r r_version}
+
+paste0("This RMarkdown and the included analyses were built using ", R.Version()$version.string)
+
+```
+
+\newpage
+
+# Project Background  
+  
+Microplastics are defined as plastics less than 5mm in diameter. These may be manufactured at this size or attain this size as a result of environmental degradation. Microplastic contamination can result in ingestion and bioaccumulation within the food web, leach toxicants during degradation, and potentially alter the physical and thermal properties of beach sediments (e.g., increase in mean grain size, increase in permeability, changes in heat capacity). Alterations to the beach environment is particularly concerning for sea turtle nest incubations as proper embryonic development relies on a specific range of incubation conditions with respect to temperature, moisture content, and gas exchange, among others.    
+  
+The dataset consists of 2 deployments. During the 1st deployment (1630 16 July 2018 through 1400 26 July 2018), the microplastic concentrations were divided into 5%, 10%, and 15% for each color (White, Black) + 1 Control. During the 2nd deployment (1700 20 Aug 2018 through 0800 3 Sep 2018), the concentrations were 25% and 30% for each color (White, Black) + 1 Control. Many publications report microplastic contamination as pieces per m^2^. The below conversion table is provided for reference:  
+  
+Concentration: % v/v | Concentration: $pc\: m^{-3}$ | Concentration: $pc\: m^{-2}$  
+-------------------- | ---------------------------- | ----------------------------  
+1%                   | 326,288                      | 1,788  
+5%                   | 1,631,440                    | 8,939  
+10%                  | 3,262,880                    | 17,877  
+15%                  | 4,894,320                    | 26,816  
+25%                  | 8,157,199                    | 44,693  
+30%                  | 9,788,639                    | 53,632  
+  
+Atmospheric data (air temperature, solar radiation, and daily rainfall) were downloaded from the WeatherSTEM station at the FSU Coastal and Marine Lab (https://franklin.weatherstem.com/fsucml). Air Temperature is in $^\circ C$, rain is in cm, and solar radiation is in W m^-2^.  
+  
+## Research Questions  
+  
+1) How does the concentration of microplastic impact the thermal profile of silicate sands at average loggerhead sea turtle nest chamber depths?  
+  
+2) How does the color of microplastic impact the thermal profile of silicate sands at average loggerhead sea turtle nest chamber depths?  
+  
+# Data Preparation  
+  
+Load required libraries and read in data. Convert the date columns into an R-readable format.  
+  
+```{r libraries, message = FALSE, echo = TRUE}
+
+library(DHARMa)
+library(knitr)
+library(MASS)
+library(plotrix)
+library(report)
+
+```
+```{r data, message = FALSE}
+
+tempData <- read.csv("Supp Mat - Beckwith Temp Data v1.csv", header = TRUE)
+tempData$Date.Time <- as.POSIXct(tempData$Date.Time, format = "%m/%d/%Y %H:%M")
+
+tsData <- read.csv("Supp Mat - Beckwith Temp Data v2.csv", header = TRUE)
+tsData$Date <- as.POSIXct(tsData$Date, format = "%m/%d/%Y")
+
+```
+  
+\newpage
+  
+**Conversion for volumetric microplastic treatments to microplastics per m^2^ for comparison to literature values**  
+  
+* 55-gal Uline drum diameter -> 23.25" or 0.5906 m  
+* Surface Area = $pi*r^2$ -> 0.2740 m^2^  
+  
+Most sediment samples in the literature report "n pieces microplastics m^-2^ ($pc\: m^{-2}$)" but actually sample the top 2 cm of sand within a quadrat. So they are reporting a flat area, but are really sampling a cube. This is equivalent to taking a 2 cm slice through the 55-gal drum (m^3^) and reporting the number of microplastic pieces in that slice as if it were flat (m^2^).  
+  
+* Surface Area to Volume Conversion = $pi*r^2*h$ = 0.2740 m^2^ * 0.02 m depth -> 0.005479 m^3^  
+  
+It took 38 plastic plates to generate 1 gal of microplastic pieces. On average, the microplastic shredder generated 3,250 pieces per plate. This translates to 123,500 microplastic pieces per gallon of microplastic. 2, 4, 6, 10, and 12 gal of microplastic were mixed into 38, 36, 34, 30, and 28 gal of silicate sand to generate 40 gal each of 5%, 10%, 15%, 25%, and 30% v/v microplastic-sand mixtures. A function to calculate the concentration conversion is listed below:  
+  
+```{r concentrationConversion1, echo = TRUE}
+
+nPiecesPerGal <- 123500 # pieces/gal
+m3perGal <- 0.003785 # m3/gal
+drumSlice <- 0.005479 # m3
+
+galTom3Conversion <- function(nGalUsed){
+  nPiecesAdded <- nPiecesPerGal*nGalUsed
+  nPiecesPerM3Treatment <- nPiecesAdded/(40*m3perGal)
+  return(round(nPiecesPerM3Treatment, 0))
+}
+
+m3Tom2Conversion <- function(nGalUsed){
+  nPiecesAdded <- nPiecesPerGal*nGalUsed
+  nPiecesPerM3Treatment <- nPiecesAdded/(40*m3perGal)
+  nPiecesPerSlice <- nPiecesPerM3Treatment*drumSlice
+  return(round(nPiecesPerSlice, 0))
+}
+
+```
+  
+```{r concentrationConversion2}
+
+paste0("1% v/v = ", galTom3Conversion(nGalUsed = 0.4), " pc m-3, ", m3Tom2Conversion(nGalUsed = 0.4), " pc m-2") # 1% for reference to Discussion
+paste0("5% v/v = ", galTom3Conversion(nGalUsed = 2), " pc m-3, ", m3Tom2Conversion(nGalUsed = 2), " pc m-2") # 5% Treatment: 2 gal microplastic/40 gal sand+microplastic
+paste0("10% v/v = ", galTom3Conversion(nGalUsed = 4), " pc m-3, ", m3Tom2Conversion(nGalUsed = 4), " pc m-2") # 10% Treatment: 4 gal microplastic/40 gal sand+microplastic
+paste0("15% v/v = ", galTom3Conversion(nGalUsed = 6), " pc m-3, ", m3Tom2Conversion(nGalUsed = 6), " pc m-2") # 15% Treatment: 6 gal microplastic/40 gal sand+microplastic
+paste0("25% v/v = ", galTom3Conversion(nGalUsed = 10), " pc m-3, ", m3Tom2Conversion(nGalUsed = 10), " pc m-2") # 25% Treatment: 10 gal microplastic/40 gal sand+microplastic
+paste0("30% v/v = ", galTom3Conversion(nGalUsed = 12), " pc m-3, ", m3Tom2Conversion(nGalUsed = 12), " pc m-2") # 30% Treatment: 12 gal microplastic/40 gal sand+microplastic
+
+```
+  
+\newpage  
+  
+# Data Exploration  
+  
+```{r temp_avg1, echo = FALSE, warning = FALSE}
+
+tempData_Deploy1 <- tempData[tempData$Deployment == "1",]
+tempData_Deploy2 <- tempData[tempData$Deployment == "2",]
+
+tempSummary <- data.frame(Mean = rep(0, 34), SD = rep(0, 34), Min = rep(0, 34), Max = rep(0, 34))
+rownames(tempSummary) <- names(tempData[c(5:38)])
+
+for(i in c(5:38)){
+  tempSummary[i-4,1] <- round(mean(tempData_Deploy1[,i], na.rm = TRUE), 3)
+  tempSummary[i-4,2] <- round(sd(tempData_Deploy1[,i], na.rm = TRUE), 3)
+  tempSummary[i-4,3] <- round(min(tempData_Deploy1[,i], na.rm = TRUE), 3)
+  tempSummary[i-4,4] <- round(max(tempData_Deploy1[,i], na.rm = TRUE), 3)
+}
+
+kable(tempSummary, caption = "Data distribution by iButton logger: Deployment 1")
+
+```
+  
+\newpage  
+  
+```{r temp_avg2, echo = FALSE, warning = FALSE}
+
+
+tempSummary2 <- data.frame(Mean = rep(0, 34), SD = rep(0, 34), Min = rep(0, 34), Max = rep(0, 34))
+rownames(tempSummary2) <- names(tempData[c(5:38)])
+
+for(i in c(5:38)){
+  tempSummary2[i-4,1] <- round(mean(tempData_Deploy2[,i], na.rm = TRUE), 3)
+  tempSummary2[i-4,2] <- round(sd(tempData_Deploy2[,i], na.rm = TRUE), 3)
+  tempSummary2[i-4,3] <- round(min(tempData_Deploy2[,i], na.rm = TRUE), 3)
+  tempSummary2[i-4,4] <- round(max(tempData_Deploy2[,i], na.rm = TRUE), 3)
+}
+
+kable(tempSummary2, caption = "Data distribution by iButton logger: Deployment 2")
+
+```
+  
+\newpage  
+  
+Convert the observed temperature values for samples with 2 functioning loggers into the differences in temperature between those loggers. Only Black 30% is left off as 1 of the loggers completely failed during deployment. Differences between paired iButtons is typically minimal (0.161 deg C +/- 0.149 SD).  
+  
+```{r temp_diff, echo = FALSE}
+
+tempData_Deploy1_diff <- data.frame(Date.Time = tempData_Deploy1$Date.Time, 
+                                    Control_diff = tempData_Deploy1$Control_A - tempData_Deploy1$Control_B, 
+                             White5_diff = tempData_Deploy1$White_5A - tempData_Deploy1$White_5B, 
+                             White10_diff = tempData_Deploy1$White_10A - tempData_Deploy1$White_10B, 
+                             White15_diff = tempData_Deploy1$White_15A - tempData_Deploy1$White_15B,
+                             Black5_diff = tempData_Deploy1$Black_5A - tempData_Deploy1$Black_5B,
+                             Black10_diff = tempData_Deploy1$Black_10A - tempData_Deploy1$Black_10B,
+                             Black15_diff = tempData_Deploy1$Black_15A - tempData_Deploy1$Black_15B)
+
+tempData_Deploy2_diff <- data.frame(Date.Time = tempData_Deploy2$Date.Time, 
+                                    Control_diff = tempData_Deploy2$Control_A - tempData_Deploy2$Control_B, 
+                             White25_diff = tempData_Deploy2$White_25A - tempData_Deploy2$White_25B, 
+                             White30_diff = tempData_Deploy2$White_30A - tempData_Deploy2$White_30B, 
+                             Black25_diff = tempData_Deploy2$Black_25A - tempData_Deploy2$Black_25B)
+
+tempDeploy1_DiffSummary <- data.frame(Mean = rep(0, 7), SD = rep(0, 7), Min = rep(0, 7), Max = rep(0, 7))
+rownames(tempDeploy1_DiffSummary) <- c("Control", "White 5%", "White 10%", "White 15%", "Black 5%", "Black 10%", "Black 15%")
+
+for(i in c(2:8)){
+  tempDeploy1_DiffSummary[i-1,1] <- abs(round(mean(tempData_Deploy1_diff[,i]), 3))
+  tempDeploy1_DiffSummary[i-1,2] <- abs(round(sd(tempData_Deploy1_diff[,i]), 3))
+  tempDeploy1_DiffSummary[i-1,3] <- abs(min(tempData_Deploy1_diff[,i]))
+  tempDeploy1_DiffSummary[i-1,4] <- abs(max(tempData_Deploy1_diff[,i]))
+}
+
+kable(tempDeploy1_DiffSummary, caption = "Summary of paired logger differences: Deployment 1")
+
+tempDeploy2_DiffSummary <- data.frame(Mean = rep(0, 4), SD = rep(0, 4), Min = rep(0, 4), Max = rep(0, 4))
+rownames(tempDeploy2_DiffSummary) <- c("Control", "White 25%", "White 30%", "Black 25%")
+
+for(i in c(2:5)){
+  tempDeploy2_DiffSummary[i-1,1] <- abs(round(mean(tempData_Deploy2_diff[,i], na.rm = TRUE), 3))
+  tempDeploy2_DiffSummary[i-1,2] <- abs(round(sd(tempData_Deploy2_diff[,i], na.rm = TRUE), 3))
+  tempDeploy2_DiffSummary[i-1,3] <- abs(min(tempData_Deploy2_diff[,i], na.rm = TRUE))
+  tempDeploy2_DiffSummary[i-1,4] <- abs(max(tempData_Deploy2_diff[,i], na.rm = TRUE))
+}
+
+kable(tempDeploy2_DiffSummary, caption = "Summary of paired logger differences: Deployment 2")
+
+paste0("Overall mean temperature difference between iButton logger pairs: ", 
+       round(mean(c(abs(tempData_Deploy1$Control_A - tempData_Deploy1$Control_B), abs(tempData_Deploy1$White_5A - tempData_Deploy1$White_5B),
+       abs(tempData_Deploy1$White_10A - tempData_Deploy1$White_10B), abs(tempData_Deploy1$White_15A - tempData_Deploy1$White_15B),
+       abs(tempData_Deploy1$Black_5A - tempData_Deploy1$Black_5B), abs(tempData_Deploy1$Black_10A - tempData_Deploy1$Black_10B),
+       abs(tempData_Deploy1$Black_15A - tempData_Deploy1$Black_15B), abs(tempData_Deploy2$Control_A - tempData_Deploy2$Control_B),
+       abs(tempData_Deploy2$White_25A - tempData_Deploy2$White_25B), abs(tempData_Deploy2$White_30A - tempData_Deploy2$White_30B),
+       abs(tempData_Deploy2$Black_25A - tempData_Deploy2$Black_25B)), na.rm = TRUE), 3),
+       " deg C")
+paste0("Standard deviation of temperature differences between logger pairs: ", 
+       round(sd(c(abs(tempData_Deploy1$Control_A - tempData_Deploy1$Control_B), abs(tempData_Deploy1$White_5A - tempData_Deploy1$White_5B),
+       abs(tempData_Deploy1$White_10A - tempData_Deploy1$White_10B), abs(tempData_Deploy1$White_15A - tempData_Deploy1$White_15B),
+       abs(tempData_Deploy1$Black_5A - tempData_Deploy1$Black_5B), abs(tempData_Deploy1$Black_10A - tempData_Deploy1$Black_10B),
+       abs(tempData_Deploy1$Black_15A - tempData_Deploy1$Black_15B), abs(tempData_Deploy2$Control_A - tempData_Deploy2$Control_B),
+       abs(tempData_Deploy2$White_25A - tempData_Deploy2$White_25B), abs(tempData_Deploy2$White_30A - tempData_Deploy2$White_30B),
+       abs(tempData_Deploy2$Black_25A - tempData_Deploy2$Black_25B)), na.rm = TRUE), 3),
+       " deg C")
+
+```
+  
+The paired iButtons were averaged together to generate 1 temperature record per treatment per deployment.  
+  
+```{r final_data, include = FALSE}
+
+finalData <- data.frame(Deploy = tempData$Deployment, Date.Time = tempData$Date.Time, Control = tempData$Control_Avg, 
+                        White_5 = tempData$White_5_Avg, 
+                        White_10 = tempData$White_10Avg, White_15 = tempData$White_15Avg, White_25 = tempData$White_25_Avg, 
+                        White_30 = tempData$White_30_Avg, Black_5 = tempData$Black_5Avg, Black_10 = tempData$Black_10Avg, 
+                        Black_15 = tempData$Black_15Avg, Black_25 = tempData$Black_25_Avg, Black_30 = tempData$Black_30B,
+                        Air_Temp = tempData$Air_Temp, Radiation = tempData$Solar_Rad, Rain = tempData$Rain)
+
+finalDiff <- data.frame(Deploy = tempData$Deployment, Date.Time = finalData$Date.Time, Control = finalData$Control - finalData$Control, 
+                        White_5 = finalData$White_5 - finalData$Control, White_10 = finalData$White_10 - finalData$Control, 
+                        White_15 = finalData$White_15 - finalData$Control, White_25 = finalData$White_25 - finalData$Control, 
+                        White_30 = finalData$White_30 - finalData$Control, Black_5 = finalData$Black_5 - finalData$Control, 
+                        Black_10 = finalData$Black_10 - finalData$Control, Black_15 = finalData$Black_15 - finalData$Control, 
+                        Black_25 = finalData$Black_25 - finalData$Control, Black_30 = finalData$Black_30 - finalData$Control)
+
+```
+  
+\newpage
+  
+## Plotting and Data Description  
+  
+### Atmospheric Data  
+  
+Below are plots of the atmospheric variables.  
+
+```{r atmos_plots, echo = FALSE, fig.width = 12, fig.height = 12}
+
+finalData_Deploy1 <- finalData[finalData$Deploy == "1",]
+finalData_Deploy2 <- finalData[finalData$Deploy == "2",]
+
+#-------------
+
+par(mfrow = c(3, 2), family = "serif", mar = c(4.5, 4.5, 3, 0.5), bty = "n", las = 1, cex.axis = 1.2, cex.lab = 1.3)
+
+plot(finalData_Deploy1$Date.Time, finalData_Deploy1$Air_Temp, xlab = "Date", ylab = "Air Temperature (\u00B0C)", 
+     main = "Deployment 1", type = "l", ylim = c(21.5, 34))
+plot(finalData_Deploy2$Date.Time, finalData_Deploy2$Air_Temp, xlab = "Date", ylab = "Air Temperature (\u00B0C)", 
+     main = "Deployment 2", type = "l", ylim = c(21.5, 34))
+
+plot(finalData_Deploy1$Date.Time, finalData_Deploy1$Radiation, xlab = "Date", ylab = expression(paste("Solar Radiation (W m"^" -2",")")), 
+     main = "Deployment 1", type = "l", ylim = c(0, 1200))
+plot(finalData_Deploy2$Date.Time, finalData_Deploy2$Radiation, xlab = "Date", ylab = expression(paste("Solar Radiation (W m"^" -2",")")), 
+     main = "Deployment 1", type = "l", ylim = c(0, 1200))
+
+plot(finalData_Deploy1$Date.Time, finalData_Deploy1$Rain, xlab = "Date", ylab = "Daily Rain (cm)", main = "Deployment 1", type = "l", 
+     ylim = c(0,  8.5))
+plot(finalData_Deploy2$Date.Time, finalData_Deploy2$Rain, xlab = "Date", ylab = "Daily Rain (cm)", main = "Deployment 2", type = "l", 
+     ylim = c(0,8.5))
+
+```
+  
+\newpage
+  
+**Differences in Atmospheric Variables Between Treatments**  
+  
+Air temperature and solar radiation were not signficantly different between deployments (air temp ANOVA p = 0.087, solar radiation ANOVA p = 0.884). However, rainfall was significantly different (ANOVA p << 0.001) with the second deployment receiving, on average, 0.42 cm more rain per day than Deployment 1.  
+  
+*Air Temperature*  
+  
+```{r air_temp_diff, echo = FALSE}
+
+mAir <- lm(finalData$Air_Temp ~ finalData$Deploy)
+summary(mAir)
+
+```
+  
+*Solar Radiation*  
+  
+```{r solarRad_temp_diff, echo = FALSE}
+
+mSolar <- lm(finalData$Radiation ~ finalData$Deploy)
+summary(mSolar)
+
+```
+  
+\newpage
+  
+*Rain*  
+  
+```{r rain_temp_diff, echo = FALSE}
+
+mRain <- lm(finalData$Rain ~ finalData$Deploy)
+summary(mRain)
+
+```
+  
+### Full Deployments  
+  
+**White Samples**  
+  
+In both deployments, all White concentrations follow the same daily cycle as the Control. In the middle of Deployment 1 and end of Deployment 2, there appears to be several days of cooler weather (check above rain and solar radiation plots).  
+  
+```{r overall_TS_plots_white, echo = FALSE, fig.width = 7, fig.height = 8}
+
+par(mfrow = c(2, 1), family = "serif", mar = c(4.5, 4.5, 3, 0.5), bty = "n", las = 1, cex.axis = 1.2, cex.lab = 1.3)
+
+plot(finalData_Deploy1$Date.Time, finalData_Deploy1$Air_Temp, xlab = "Date", ylab = "Temperature (\u00B0C)", main = "Deployment 1", type = "l", 
+     lty = 2, ylim = c(22,42))
+lines(finalData_Deploy1$Date.Time, finalData_Deploy1$Control, col = "black")
+lines(finalData_Deploy1$Date.Time, finalData_Deploy1$White_5, col = "red")
+lines(finalData_Deploy1$Date.Time, finalData_Deploy1$White_10, col = "blue")
+lines(finalData_Deploy1$Date.Time, finalData_Deploy1$White_15, col = "darkgreen")
+legend("topleft", legend = c("Air Temp", "Control", "White 5%", "White 10%", "White 25%"), col = c("black", "black", "red", "blue", "darkgreen"), 
+       lty = c(2, 1, 1, 1, 1), bty = "n", cex = 0.9)
+
+
+plot(finalData_Deploy2$Date.Time, finalData_Deploy2$Air_Temp, xlab = "Date", ylab = "Temperature (\u00B0C)", main = "Deployment 2", type = "l", 
+     lty = 2, ylim = c(22,42))
+lines(finalData_Deploy2$Date.Time, finalData_Deploy2$Control, col = "black")
+lines(finalData_Deploy2$Date.Time, finalData_Deploy2$White_25, col = "blue")
+lines(finalData_Deploy2$Date.Time, finalData_Deploy2$White_30, col = "darkgreen")
+legend("topright", legend = c("Air Temp", "Control", "White 25%", "White 30%"), col = c("black", "black", "blue", "darkgreen"), 
+       lty = c(2, 1, 1, 1), bty = "n", cex = 0.9)
+
+```
+  
+\newpage
+  
+**Black Samples**  
+  
+Similar trends are seen in the Black deployments as in the White deployments. There is good agreement between the Control and Black samples. During the first half of the deployment, the Black 30% appears to be warmer than the other samples, whereas the Black 5% becomes the warmest each day in the back half of the deployment. The Black 5% appears to have a greater daily range than the other samples. A similar cooling at the end of August is visible, as in the White samples.  
+  
+```{r overall_TS_plots_black, echo = FALSE, fig.width = 7, fig.height = 8}
+
+par(mfrow = c(2, 1), family = "serif", mar = c(4.5, 4.5, 3, 0.5), bty = "n", las = 1, cex.axis = 1.2, cex.lab = 1.3)
+
+plot(finalData_Deploy1$Date.Time, finalData_Deploy1$Air_Temp, xlab = "Date", ylab = "Temperature (\u00B0C)", main = "Deployment 1", type = "l", 
+     lty = 2, ylim = c(22,42))
+lines(finalData_Deploy1$Date.Time, finalData_Deploy1$Control, col = "black")
+lines(finalData_Deploy1$Date.Time, finalData_Deploy1$Black_5, col = "red")
+lines(finalData_Deploy1$Date.Time, finalData_Deploy1$Black_10, col = "blue")
+lines(finalData_Deploy1$Date.Time, finalData_Deploy1$Black_15, col = "darkgreen")
+legend("topleft", legend = c("Air Temp", "Control", "Black 5%", "Black 10%", "Black 25%"), col = c("black", "black", "red", "blue", "darkgreen"), 
+       lty = c(2, 1, 1, 1, 1), bty = "n", cex = 0.9)
+
+
+plot(finalData_Deploy2$Date.Time, finalData_Deploy2$Air_Temp, xlab = "Date", ylab = "Temperature (\u00B0C)", main = "Deployment 2", type = "l", 
+     lty = 2, ylim = c(22,42))
+lines(finalData_Deploy2$Date.Time, finalData_Deploy2$Control, col = "black")
+lines(finalData_Deploy2$Date.Time, finalData_Deploy2$Black_25, col = "blue")
+lines(finalData_Deploy2$Date.Time, finalData_Deploy2$Black_30, col = "darkgreen")
+legend("topright", legend = c("Air Temp", "Control", "Black 25%", "Black 30%"), col = c("black", "black", "blue", "darkgreen"), 
+       lty = c(2, 1, 1, 1), bty = "n", cex = 0.9)
+
+```
+  
+\newpage
+  
+### Differences Relative to Control  
+  
+**White Samples**
+  
+Plotting the differences between the White samples and the Control reveals mixed results. In almost all White cases (exception: Deployment 1 White 15%) the samples are retaining more heat than the Control.  
+  
+```{r difference_TS_plots_white, echo = FALSE, fig.width = 12, fig.height = 5}
+
+finalDiff_Deploy1 <- finalDiff[finalDiff$Deploy == "1",]
+finalDiff_Deploy2 <- finalDiff[finalDiff$Deploy == "2",]
+
+par(mfrow = c(1, 2), family = "serif", mar = c(4.5, 4.5, 3, 0.5), bty = "n", las = 1, cex.axis = 1.2, cex.lab = 1.3)
+
+plot(finalDiff_Deploy1$Date.Time, finalDiff_Deploy1$Control, xlab = "Date", ylab = "Difference in Sand Temp (\u00B0C)", 
+     main = "Difference in Sand Temperature - Deployment 1", type = "l", las = 1, ylim = c(-1.4, 1.6))
+lines(finalDiff_Deploy1$Date.Time, finalDiff_Deploy1$White_5, col = "red")
+lines(finalDiff_Deploy1$Date.Time, finalDiff_Deploy1$White_10, col = "blue")
+lines(finalDiff_Deploy1$Date.Time, finalDiff_Deploy1$White_15, col = "darkgreen")
+legend("topright", legend = c("Control", "White 5%", "White 10%", "White 15%"), col = c("black", "red", "blue", "darkgreen"), lty = c(1, 1, 1, 1), bty = "n")
+
+plot(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$Control, xlab = "Date", ylab = "Difference in Sand Temp (\u00B0C)", 
+     main = "Difference in Sand Temperature - Deployment 2", type = "l", las = 1, ylim = c(-1.4, 1.6))
+lines(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$White_25, col = "blue")
+lines(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$White_30, col = "darkgreen")
+legend("bottomright", legend = c("Control", "White 25%", "White 30%"), col = c("black", "blue", "darkgreen"), lty = c(1, 1, 1, 1), bty = "n")
+
+```
+  
+**White Samples - Subset of Deployment 1**  
+  
+18 July 0000 to 19 July 2330.  
+  
+```{r difference_TS_plots_white_zoom1, echo = FALSE, fig.width = 12, fig.height = 5}
+
+par(mfrow = c(1, 2), family = "serif", mar = c(4.5, 4.5, 3, 0.5), bty = "n", las = 1, cex.axis = 1.2, cex.lab = 1.3)
+
+plot(finalData_Deploy1[c(64:159),]$Date.Time, finalData_Deploy1[c(64:159),]$Control, xlab = "Date", ylab = "Sand Temperature (\u00B0C)", 
+     main = "Observed Sand Temperature - 18/19 Jul", type = "l", lwd = 2, las = 1, ylim = c(24, 38))
+lines(finalData_Deploy1[c(64:159),]$Date.Time, finalData_Deploy1[c(64:159),]$White_5, col = "red")
+lines(finalData_Deploy1[c(64:159),]$Date.Time, finalData_Deploy1[c(64:159),]$White_10, col = "blue")
+lines(finalData_Deploy1[c(64:159),]$Date.Time, finalData_Deploy1[c(64:159),]$White_15, col = "darkgreen")
+legend("topleft", legend = c("Control", "White 5%", "White 10%", "White 15%"), col = c("black", "red", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+plot(finalDiff_Deploy1[c(64:159),]$Date.Time, finalDiff_Deploy1[c(64:159),]$Control, xlab = "Date", ylab = "Difference in Sand Temp (\u00B0C)", 
+     main = "Difference in Sand Temperature - 18/19 Jul", type = "l", las = 1, ylim = c(-1.4, 1.6))
+lines(finalDiff_Deploy1[c(64:159),]$Date.Time, finalDiff_Deploy1[c(64:159),]$White_5, col = "red")
+lines(finalDiff_Deploy1[c(64:159),]$Date.Time, finalDiff_Deploy1[c(64:159),]$White_10, col = "blue")
+lines(finalDiff_Deploy1[c(64:159),]$Date.Time, finalDiff_Deploy1[c(64:159),]$White_15, col = "darkgreen")
+legend("topright", legend = c("Control", "White 5%", "White 10%", "White 15%"), col = c("black", "red", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+```
+  
+\newpage
+  
+23 July 0000 to 25 July 2330.  
+  
+```{r difference_TS_plots_white_zoom2, echo = FALSE, fig.width = 12, fig.height = 5}
+
+par(mfrow = c(1, 2), family = "serif", mar = c(4.5, 4.5, 3, 0.5), bty = "n", las = 1, cex.axis = 1.2, cex.lab = 1.3)
+
+plot(finalData_Deploy1[c(304:447),]$Date.Time, finalData_Deploy1[c(304:447),]$Control, xlab = "Date", ylab = "Sand Temperature (\u00B0C)", 
+     main = "Observed Sand Temperature - 23/25 Jul", type = "l", lwd = 2, las = 1, ylim = c(24, 38))
+lines(finalData_Deploy1[c(304:447),]$Date.Time, finalData_Deploy1[c(304:447),]$White_5, col = "red")
+lines(finalData_Deploy1[c(304:447),]$Date.Time, finalData_Deploy1[c(304:447),]$White_10, col = "blue")
+lines(finalData_Deploy1[c(304:447),]$Date.Time, finalData_Deploy1[c(304:447),]$White_15, col = "darkgreen")
+legend("topleft", legend = c("Control", "White 5%", "White 10%", "White 15%"), col = c("black", "red", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+plot(finalDiff_Deploy1[c(304:447),]$Date.Time, finalDiff_Deploy1[c(304:447),]$Control, xlab = "Date", 
+     ylab = "Difference in Sand Temp (\u00B0C)", main = "Difference in Sand Temperature - 23/25 Jul", type = "l", las = 1, ylim = c(-1.4, 1.6))
+lines(finalDiff_Deploy1[c(304:447),]$Date.Time, finalDiff_Deploy1[c(304:447),]$White_5, col = "red")
+lines(finalDiff_Deploy1[c(304:447),]$Date.Time, finalDiff_Deploy1[c(304:447),]$White_10, col = "blue")
+lines(finalDiff_Deploy1[c(304:447),]$Date.Time, finalDiff_Deploy1[c(304:447),]$White_15, col = "darkgreen")
+legend("topright", legend = c("Control", "White 5%", "White 10%", "White 15%"), col = c("black", "red", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+```
+  
+**White Samples - Subset of Deployment 2**
+  
+When zoomed into 22 Aug 0000 to 23 Aug 2330, it appears as though the White 25% and 30% are retaining heat after the Control has started to cool. A decrease in the White 30% sample relative to the control is visible. The White 25% is changing temperature at comparable rates to Control (i.e., similar slope in second figure) during this time period.  
+  
+```{r difference_TS_plots_white_zoom3, echo = FALSE, fig.width = 12, fig.height = 5}
+
+par(mfrow = c(1, 2), family = "serif", mar = c(4.5, 4.5, 3, 0.5), bty = "n", las = 1, cex.axis = 1.2, cex.lab = 1.3)
+
+plot(finalData_Deploy2[c(63:158),]$Date.Time, finalData_Deploy2[c(63:158),]$Control, xlab = "Date", ylab = "Sand Temperature (\u00B0C)", 
+     main = "Observed Sand Temperature - 22/23 Aug", type = "l", lwd = 2, las = 1, ylim = c(26,38))
+lines(finalData_Deploy2[c(63:158),]$Date.Time, finalData_Deploy2[c(63:158),]$White_25, col = "blue")
+lines(finalData_Deploy2[c(63:158),]$Date.Time, finalData_Deploy2[c(63:158),]$White_30, col = "darkgreen")
+legend("topleft", legend = c("Control", "White 25%", "White 30%"), col = c("black", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+plot(finalDiff_Deploy2[c(63:158),]$Date.Time, finalDiff_Deploy2[c(63:158),]$Control, xlab = "Date", ylab = "Difference in Sand Temp (\u00B0C)", 
+     main = "Difference in Sand Temperature - 22/23 Aug", type = "l", las = 1, ylim = c(-1.4, 1.6))
+lines(finalDiff_Deploy2[c(63:158),]$Date.Time, finalDiff_Deploy2[c(63:158),]$White_25, col = "blue")
+lines(finalDiff_Deploy2[c(63:158),]$Date.Time, finalDiff_Deploy2[c(63:158),]$White_30, col = "darkgreen")
+legend("bottomright", legend = c("Control", "White 25%", "White 30%"), col = c("black", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+```
+  
+\newpage
+  
+Focusing in on 29 Aug 0000 to 3 Sep 0800 demonstrates the same offset as in the other figures. The White 25% is still showing the smallest temperature deviations from the Control. In both zoomed-in views, the White 30% is returning to the Control temperature during the cooling phase of the diurnal cycle. It is only in the second zoomed-in view that the White 25% does the same. The same thermal inertia observations as in the earlier Deployment 2 plot is visible in this subset as well.  
+  
+```{r difference_TS_plots_white_zoom4, echo = FALSE, fig.width = 12, fig.height = 5}
+
+par(mfrow = c(1, 2), family = "serif", mar = c(4.5, 4.5, 3, 0.5), bty = "n", las = 1, cex.axis = 1.2, cex.lab = 1.3)
+
+plot(finalData_Deploy2[c(495:655),]$Date.Time, finalData_Deploy2[c(495:655),]$Control, xlab = "Date", ylab = "Sand Temperature (\u00B0C)", 
+     main = "Observed Sand Temperature - 22/23 Aug", type = "l", lwd = 2, las = 1, ylim = c(24,36))
+lines(finalData_Deploy2[c(495:655),]$Date.Time, finalData_Deploy2[c(495:655),]$White_25, col = "blue")
+lines(finalData_Deploy2[c(495:655),]$Date.Time, finalData_Deploy2[c(495:655),]$White_30, col = "darkgreen")
+legend("topleft", legend = c("Control", "White 25%", "White 30%"), col = c("black", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+plot(finalDiff_Deploy2[c(495:655),]$Date.Time, finalDiff_Deploy2[c(495:655),]$Control, xlab = "Date", 
+     ylab = "Difference in Sand Temp (\u00B0C)", main = "Difference in Sand Temperature - 29 Aug/3 Sep", type = "l", las = 1, 
+     ylim = c(-1.4, 1.6))
+lines(finalDiff_Deploy2[c(495:655),]$Date.Time, finalDiff_Deploy2[c(495:655),]$White_25, col = "blue")
+lines(finalDiff_Deploy2[c(495:655),]$Date.Time, finalDiff_Deploy2[c(495:655),]$White_30, col = "darkgreen")
+legend("bottomright", legend = c("Control", "White 25%", "White 30%"), col = c("black", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+```
+  
+**Black Samples**  
+  
+The Black samples fit closer to expectations. In both deployments, the largest concentrations of microplastic are showing the highest deviations in temperature relative to the Control. During the first deployment, the Black 5% heated/cooled very erratically relative to the Control and other Black samples. In all cases, the samples are absorbing more heat than the Control.  
+  
+```{r difference_TS_plots_black, echo = FALSE, fig.width = 12, fig.height = 5}
+
+par(mfrow = c(1, 2), family = "serif", mar = c(4.5, 4.5, 3, 0.5), bty = "n", las = 1, cex.axis = 1.2, cex.lab = 1.3)
+
+plot(finalDiff_Deploy1$Date.Time, finalDiff_Deploy1$Control, xlab = "Date", ylab = "Sand Temperature (\u00B0C)", 
+     main = "Difference in Sand Temperature - Deployment 1", type = "l", las = 1, ylim = c(-1.4, 1.6))
+lines(finalDiff_Deploy1$Date.Time, finalDiff_Deploy1$Black_5, col = "red")
+lines(finalDiff_Deploy1$Date.Time, finalDiff_Deploy1$Black_10, col = "blue")
+lines(finalDiff_Deploy1$Date.Time, finalDiff_Deploy1$Black_15, col = "darkgreen")
+legend("bottomright", legend = c("Control", "Black 5%", "Black 10%", "Black 15%"), col = c("black", "red", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+plot(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$Control, xlab = "Date", ylab = "Difference in Sand Temp (\u00B0C)", 
+     main = "Difference in Sand Temperature - Deployment 2", type = "l", las = 1, ylim = c(-1.4, 1.6))
+lines(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$Black_25, col = "blue")
+lines(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$Black_30, col = "darkgreen")
+legend("bottomright", legend = c("Control", "Black 25%", "Black 30%"), col = c("black", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+```
+  
+\newpage
+  
+**Black Samples - Subset of Deployment 1**  
+  
+18 July 0000 to 19 July 2330.  
+  
+```{r difference_TS_plots_black_zoom1, echo = FALSE, fig.width = 12, fig.height = 5}
+
+par(mfrow = c(1, 2), family = "serif", mar = c(4.5, 4.5, 3, 0.5), bty = "n", las = 1, cex.axis = 1.2, cex.lab = 1.3)
+
+plot(finalData_Deploy1[c(64:159),]$Date.Time, finalData_Deploy1[c(64:159),]$Control, xlab = "Date", ylab = "Sand Temp (\u00B0C)", 
+     main = "Observed Sand Temperature - 18/19 Jul", type = "l", las = 1, ylim = c(26,38))
+lines(finalData_Deploy1[c(64:159),]$Date.Time, finalData_Deploy1[c(64:159),]$Black_5, col = "red")
+lines(finalData_Deploy1[c(64:159),]$Date.Time, finalData_Deploy1[c(64:159),]$Black_10, col = "blue")
+lines(finalData_Deploy1[c(64:159),]$Date.Time, finalData_Deploy1[c(64:159),]$Black_15, col = "darkgreen")
+legend("topleft", legend = c("Control", "Black 5%", "Black 10%", "Black 15%"), col = c("black", "red", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+plot(finalDiff_Deploy1[c(64:159),]$Date.Time, finalDiff_Deploy1[c(64:159),]$Control, xlab = "Date", ylab = "Difference in Sand Temp (\u00B0C)", 
+     main = "Difference in Sand Temperature - 18/19 Jul", type = "l", las = 1, ylim = c(-1.4, 1.6))
+lines(finalDiff_Deploy1[c(64:159),]$Date.Time, finalDiff_Deploy1[c(64:159),]$Black_5, col = "red")
+lines(finalDiff_Deploy1[c(64:159),]$Date.Time, finalDiff_Deploy1[c(64:159),]$Black_10, col = "blue")
+lines(finalDiff_Deploy1[c(64:159),]$Date.Time, finalDiff_Deploy1[c(64:159),]$Black_15, col = "darkgreen")
+legend("topright", legend = c("Control", "Black 5%", "Black 10%", "Black 15%"), col = c("black", "red", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+```
+  
+23 July 0000 to 25 July 2330.   
+  
+```{r difference_TS_plots_black_zoom2, echo = FALSE, fig.width = 12, fig.height = 5}
+
+par(mfrow = c(1, 2), family = "serif", mar = c(4.5, 4.5, 3, 0.5), bty = "n", las = 1, cex.axis = 1.2, cex.lab = 1.3)
+
+plot(finalData_Deploy1[c(304:447),]$Date.Time, finalData_Deploy1[c(304:447),]$Control, xlab = "Date", ylab = "Sand Temp (\u00B0C)", 
+     main = "Observed Sand Temperature - 23/25 Jul", type = "l", las = 1, ylim = c(24,38))
+lines(finalData_Deploy1[c(304:447),]$Date.Time, finalData_Deploy1[c(304:447),]$Black_5, col = "red")
+lines(finalData_Deploy1[c(304:447),]$Date.Time, finalData_Deploy1[c(304:447),]$Black_10, col = "blue")
+lines(finalData_Deploy1[c(304:447),]$Date.Time, finalData_Deploy1[c(304:447),]$Black_15, col = "darkgreen")
+legend("topleft", legend = c("Control", "Black 5%", "Black 10%", "Black 15%"), col = c("black", "red", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+plot(finalDiff_Deploy1[c(304:447),]$Date.Time, finalDiff_Deploy1[c(304:447),]$Control, xlab = "Date", 
+     ylab = "Difference in Sand Temp (\u00B0C)", main = "Difference in Sand Temperature - 23/25 Jul", type = "l", las = 1, ylim = c(-1.4, 1.6))
+lines(finalDiff_Deploy1[c(304:447),]$Date.Time, finalDiff_Deploy1[c(304:447),]$Black_5, col = "red")
+lines(finalDiff_Deploy1[c(304:447),]$Date.Time, finalDiff_Deploy1[c(304:447),]$Black_10, col = "blue")
+lines(finalDiff_Deploy1[c(304:447),]$Date.Time, finalDiff_Deploy1[c(304:447),]$Black_15, col = "darkgreen")
+legend("topright", legend = c("Control", "Black 5%", "Black 10%", "Black 15%"), col = c("black", "red", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+```
+  
+\newpage
+  
+**Black Samples - Subset of Deployment 2**  
+  
+When zoomed in to 22 Aug 0000 to 23 Aug 2330, the Black 30% sample seems to cycle slightly earlier than the Black 25%.  
+  
+```{r difference_TS_plots_black_zoom3, echo = FALSE, fig.width = 12, fig.height = 5}
+
+par(mfrow = c(1, 2), family = "serif", mar = c(4.5, 4.5, 3, 0.5), bty = "n", las = 1, cex.axis = 1.2, cex.lab = 1.3)
+
+plot(finalData_Deploy2[c(63:158),]$Date.Time, finalData_Deploy2[c(63:158),]$Control, xlab = "Date", ylab = "Sand Temp (\u00B0C)", 
+     main = "Observed Sand Temperature - 22/23 Aug", type = "l", las = 1, ylim = c(26,38))
+lines(finalData_Deploy2[c(63:158),]$Date.Time, finalData_Deploy2[c(63:158),]$Black_25, col = "blue")
+lines(finalData_Deploy2[c(63:158),]$Date.Time, finalData_Deploy2[c(63:158),]$Black_30, col = "darkgreen")
+legend("topleft", legend = c("Control", "Black 25%", "Black 30%"), col = c("black", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+plot(finalDiff_Deploy2[c(63:158),]$Date.Time, finalDiff_Deploy2[c(63:158),]$Control, xlab = "Date", ylab = "Difference in Sand Temp (\u00B0C)", 
+     main = "Difference in Sand Temperature - 22/23 Aug", type = "l", las = 1, ylim = c(-1.4, 1.6))
+lines(finalDiff_Deploy2[c(63:158),]$Date.Time, finalDiff_Deploy2[c(63:158),]$Black_25, col = "blue")
+lines(finalDiff_Deploy2[c(63:158),]$Date.Time, finalDiff_Deploy2[c(63:158),]$Black_30, col = "darkgreen")
+legend("bottomright", legend = c("Control", "Black 25%", "Black 30%"), col = c("black", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+```
+  
+Zoomed in to 29 Aug 0000 to 3 Sep 0800.  
+  
+```{r difference_TS_plots_black_zoom4, echo = FALSE, fig.width = 12, fig.height = 5}
+
+par(mfrow = c(1, 2), family = "serif", mar = c(4.5, 4.5, 3, 0.5), bty = "n", las = 1, cex.axis = 1.2, cex.lab = 1.3)
+
+plot(finalData_Deploy2[c(495:655),]$Date.Time, finalData_Deploy2[c(495:655),]$Control, xlab = "Date", ylab = "Sand Temp (\u00B0C)", 
+     main = "Observed Sand Temperature - 29 Aug/3 Sep", type = "l", las = 1, ylim = c(24,36))
+lines(finalData_Deploy2[c(495:655),]$Date.Time, finalData_Deploy2[c(495:655),]$Black_25, col = "blue")
+lines(finalData_Deploy2[c(495:655),]$Date.Time, finalData_Deploy2[c(495:655),]$Black_30, col = "darkgreen")
+legend("topleft", legend = c("Control", "Black 25%", "Black 30%"), col = c("black", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+plot(finalDiff_Deploy2[c(495:655),]$Date.Time, finalDiff_Deploy2[c(495:655),]$Control, xlab = "Date", ylab = "Difference in Sand Temp (\u00B0C)", 
+     main = "Difference in Sand Temperature - 29 Aug/3 Sep", type = "l", las = 1, ylim = c(-1.4, 1.6))
+lines(finalDiff_Deploy2[c(495:655),]$Date.Time, finalDiff_Deploy2[c(495:655),]$Black_25, col = "blue")
+lines(finalDiff_Deploy2[c(495:655),]$Date.Time, finalDiff_Deploy2[c(495:655),]$Black_30, col = "darkgreen")
+legend("bottomright", legend = c("Control", "Black 25%", "Black 30%"), col = c("black", "blue", "darkgreen"), lty = c(1, 1, 1), bty = "n")
+
+```
+  
+\newpage
+  
+*ADDITIONAL PLOTTING*  
+  
+```{r additional_plotting0, echo = FALSE, fig.width = 12, fig.height = 9, eval = TRUE}
+
+
+#jpeg("Temp Difference Hourly Color x4.jpg", width = 12, height = 9, units = "in", res = 300)
+#windows(12, 9)
+par(mfrow = c(2, 2), family = "serif", mar = c(4.5, 4.5, 1.5, 4.5), bty = "n", cex.axis = 1.2, cex.lab = 1.3)
+
+plot(finalDiff_Deploy1$Date.Time, finalDiff_Deploy1$Control, xlab = "Date", ylab = "Difference in Sand Temp (\u00B0C)", 
+     main = "", type = "l", las = 1, ylim = c(-1.4, 1.6))
+lines(finalDiff_Deploy1$Date.Time, finalDiff_Deploy1$White_5, col = "red")
+lines(finalDiff_Deploy1$Date.Time, finalDiff_Deploy1$White_10, col = "blue")
+lines(finalDiff_Deploy1$Date.Time, finalDiff_Deploy1$White_15, col = "darkgreen")
+legend("topright", legend = c("Control", "White 5%", "White 10%", "White 15%", "Rain"), 
+       col = c("black", "red", "blue", "darkgreen", "darkgrey"), lty = c(1, 1, 1, 1, 2), bty = "n")
+mtext("A.", side = 3, line = 0, adj = 0, outer = FALSE, cex = 1.3)
+par(new = TRUE)
+plot(finalData_Deploy1$Date.Time, finalData_Deploy1$Rain, axes = FALSE, xlab = "", ylab = "", main = "", type = "l", lty = 2,
+     col = "darkgrey", ylim = c(0,8.5))
+axis(side = 4, cex.axis = 1.2, las = 1)
+mtext("Daily Rainfall (cm)", side = 4, line = 2, cex = 1.1)
+par(new = FALSE)
+
+plot(finalDiff_Deploy1$Date.Time, finalDiff_Deploy1$Control, xlab = "Date", ylab = "Difference in Sand Temp (\u00B0C)", 
+     main = "", type = "l", las = 1, ylim = c(-1.4, 1.6))
+lines(finalDiff_Deploy1$Date.Time, finalDiff_Deploy1$Black_5, col = "red")
+lines(finalDiff_Deploy1$Date.Time, finalDiff_Deploy1$Black_10, col = "blue")
+lines(finalDiff_Deploy1$Date.Time, finalDiff_Deploy1$Black_15, col = "darkgreen")
+legend("topright", legend = c("Control", "Black 5%", "Black 10%", "Black 15%", "Rain"), 
+       col = c("black", "red", "blue", "darkgreen", "darkgrey"), lty = c(1, 1, 1, 1, 2), bty = "n")
+mtext("B.", side = 3, line = 0, adj = 0, outer = FALSE, cex = 1.3)
+par(new = TRUE)
+plot(finalData_Deploy1$Date.Time, finalData_Deploy1$Rain, axes = FALSE, xlab = "", ylab = "", main = "", type = "l", lty = 2,
+     col = "darkgrey", ylim = c(0,8.5))
+axis(side = 4, cex.axis = 1.2, las = 1)
+mtext("Daily Rainfall (cm)", side = 4, line = 2, cex = 1.1)
+par(new = FALSE)
+
+plot(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$Control, xlab = "Date", ylab = "Difference in Sand Temp (\u00B0C)", 
+     main = "", type = "l", las = 1, ylim = c(-1.4, 1.6))
+lines(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$White_25, col = "red")
+lines(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$White_30, col = "blue")
+legend("topright", legend = c("Control", "White 25%", "White 30%", "Rain"), col = c("black", "red", "blue", "darkgrey"), 
+       lty = c(1, 1, 1, 2), bty = "n")
+mtext("C.", side = 3, line = 0, adj = 0, outer = FALSE, cex = 1.3)
+par(new = TRUE)
+plot(finalData_Deploy2$Date.Time, finalData_Deploy2$Rain, axes = FALSE, xlab = "", ylab = "", main = "", type = "l", lty = 2,
+     col = "darkgrey", ylim = c(0,8.5))
+axis(side = 4, cex.axis = 1.2, las = 1)
+mtext("Daily Rainfall (cm)", side = 4, line = 2, cex = 1.1)
+par(new = FALSE)
+
+plot(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$Control, xlab = "Date", ylab = "Difference in Sand Temp (\u00B0C)", 
+     main = "", type = "l", las = 1, ylim = c(-1.4, 1.6))
+lines(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$Black_25, col = "red")
+lines(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$Black_30, col = "blue")
+legend("topright", legend = c("Control", "Black 25%", "Black 30%", "Rain"), col = c("black", "red", "blue", "darkgrey"), 
+       lty = c(1, 1, 1, 2), bty = "n")
+mtext("D.", side = 3, line = 0, adj = 0, outer = FALSE, cex = 1.3)
+par(new = TRUE)
+plot(finalData_Deploy2$Date.Time, finalData_Deploy2$Rain, axes = FALSE, xlab = "", ylab = "", main = "", type = "l", lty = 2,
+     col = "darkgrey", ylim = c(0,8.5))
+axis(side = 4, cex.axis = 1.2, las = 1)
+mtext("Daily Rainfall (cm)", side = 4, line = 2, cex = 1.1)
+par(new = FALSE)
+
+#dev.off()
+
+```
+  
+```{r additional_plotting1, echo = FALSE, fig.width = 10, fig.height = 9, eval = FALSE}
+
+#jpeg("Temp Difference Hourly Color Dep2.jpg", width = 10, height = 9, units = "in", res = 300)
+#windows(10, 9)
+par(mfrow = c(2, 1), family = "serif", mar = c(4.5, 4.5, 3, 0.5), bty = "n", las = 1, cex.axis = 1.2, cex.lab = 1.3)
+
+plot(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$Control, xlab = "Date", ylab = "Difference in Sand Temp (\u00B0CC)", 
+     main = "", cex.main = 1.2, type = "l", lty = 1, lwd = 2, ylim = c(-1.0, 1.4), col = "black")
+lines(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$White_25, col = "blue", lty = 1, lwd = 2)
+lines(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$White_30, col = "red", lty = 1, lwd = 2)
+legend("bottomright", legend = c("Control", "White 25%", "White 30%"), col = c("black", "blue", "red"), lty = c(1, 1, 1), 
+       bty = "n", cex = 1.2)
+mtext("A.", side = 3, line = 1, adj = 0, outer = FALSE, cex = 1.2)
+plot(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$Control, xlab = "Date", ylab = "Difference in Sand Temp (\u00B0CC)", 
+     main = "", cex.main = 1.2, type = "l", lty = 1, lwd = 2, ylim = c(-1.0, 1.4), col = "black")
+lines(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$Black_25, col = "blue", lty = 1, lwd = 2)
+lines(finalDiff_Deploy2$Date.Time, finalDiff_Deploy2$Black_30, col = "red", lty = 1, lwd = 2)
+legend("bottomright", legend = c("Control", "Black 25%", "Black 30%"), col = c("black", "blue", "red"), lty = c(1, 1, 1), 
+       bty = "n", cex = 1.2)
+mtext("B.", side = 3, line = 1, adj = 0, outer = FALSE, cex = 1.2)
+#dev.off()
+
+```
+  
+```{r additional_plotting2, echo = FALSE, fig.width = 10, fig.height = 9, eval = FALSE}
+
+daily <- read.csv("Beckwith Temp Data 3 Daily Wide v2.csv", header = TRUE)
+dailyDiff <- as.data.frame(cbind(Control = rep(0, 13), White_25 = daily$White_25 - daily$Control, White_30 = daily$White_30 - daily$Control, 
+                           Black_5 = daily$Black_5 - daily$Control, Black_25 = daily$Black_25 - daily$Control,
+                           Black_30 = daily$Black_30 - daily$Control))
+dailyDiff <- cbind(Date = as.POSIXct(daily$Date, format = "%m/%d/%Y"), dailyDiff)
+
+
+#jpeg("Temp Difference Daily Color.jpg", width = 10, height = 9, units = "in", res = 300)
+#windows(10, 9)
+par(mfrow = c(2, 1), family = "serif", mar = c(4.5, 4.5, 3, 0.5), bty = "n", las = 1, cex.axis = 1.2, cex.lab = 1.3)
+
+plot(dailyDiff$Date, dailyDiff$Control, xlab = "Date", ylab = "Difference in Sand Temp (\u00B0C)", 
+     main = "", cex.main = 1.2, type = "l", lty = 1, lwd = 2, ylim = c(-0.25, 1.2), col = "black")
+lines(dailyDiff$Date, dailyDiff$Black_25, col = "blue", lty = 1, lwd = 2)
+lines(dailyDiff$Date, dailyDiff$Black_30, col = "red", lty = 1, lwd = 2)
+par(new = TRUE)
+
+plot(finalData_Deploy2$Date.Time, finalData_Deploy2$Rain, axes = FALSE, xlab = "", ylab = "", main = "", type = "l", lty = 2, ylim = c(0,8.5))
+axis(side = 4, cex.axis = 1.2)
+mtext("Daily Rainfall (cm)", side = 4, line = 3, cex = 1.2)
+legend("topright", legend = c("Control", "Black 25%", "Black 30%", "Rain"), col = c("black", "blue", "red", "black"), 
+       lty = c(1, 1, 1, 2), bty = "n", cex = 1.2)
+mtext("A.", side = 3, line = 1, adj = 0, outer = FALSE, cex = 1.2)
+par(new = FALSE)
+
+plot(dailyDiff$Date, dailyDiff$Control, xlab = "Date", ylab = "Difference in Sand Temp (\u00B0C)", 
+     main = "", cex.main = 1.2, type = "l", lty = 1, lwd = 2, ylim = c(-0.25, 1.2), col = "black")
+lines(dailyDiff$Date, dailyDiff$White_25, col = "blue", lty = 1, lwd = 2)
+lines(dailyDiff$Date, dailyDiff$White_30, col = "red", lty = 1, lwd = 2)
+par(new = TRUE)
+
+plot(finalData_Deploy2$Date.Time, finalData_Deploy2$Rain, axes = FALSE, xlab = "", ylab = "", main = "", type = "l", lty = 2, ylim = c(0,8.5))
+axis(side = 4, cex.axis = 1.2)
+mtext("Daily Rainfall (cm)", side = 4, line = 3, cex = 1.2)
+legend("topright", legend = c("Control", "White 25%", "White 30%", "Rain"), col = c("black", "blue", "red", "black"), 
+       lty = c(1, 1, 1, 2), bty = "n", cex = 1.2)
+mtext("B.", side = 3, line = 1, adj = 0, outer = FALSE, cex = 1.2)
+par(new = FALSE)
+#dev.off()
+
+```
+```{r additional_plotting3, echo = FALSE, fig.width = 10, fig.height = 5, eval = FALSE}
+
+#jpeg("Temp Difference Daily Color 2.jpg", width = 10, height = 5, units = "in", res = 300)
+#windows(10, 5)
+par(mfrow = c(2, 1), family = "serif", mar = c(4.5, 4.5, 3, 0.5), bty = "n", las = 1, cex.axis = 1.2, cex.lab = 1.3)
+
+plot(dailyDiff$Date, dailyDiff$Control, xlab = "Date", ylab = "Difference in Sand Temp (\u00B0C)", cex.lab = 1.2, cex.axis = 1.2,
+     main = "", cex.main = 1.2, type = "l", lty = 1, lwd = 2, las = 1, ylim = c(-0.25, 1.2), col = "black")
+lines(dailyDiff$Date, dailyDiff$Black_25, col = "blue", lty = 1, lwd = 2)
+lines(dailyDiff$Date, dailyDiff$White_25, col = "blue", lty = 2, lwd = 2)
+lines(dailyDiff$Date, dailyDiff$Black_30, col = "red", lty = 1, lwd = 2)
+lines(dailyDiff$Date, dailyDiff$White_30, col = "red", lty = 2, lwd = 2)
+par(new = TRUE)
+plot(finalData_Deploy2$Date.Time, finalData_Deploy2$Rain, axes = FALSE, xlab = "", ylab = "", main = "", las = 1, type = "l", lty = 2, ylim = c(0,8.5))
+axis(side = 4, cex.axis = 1.2)
+mtext("Daily Rainfall (cm)", side = 4, line = 3, cex = 1.2)
+legend("topright", legend = c("Black 30%", "Black 25%", "Control", "White 30%", "White 25%", "Rain"), 
+       col = c("red", "blue", "black", "red", "blue", "black"), 
+       lty = c(1, 1, 1, 2, 2, 3), lwd = c(2, 2, 2, 2, 2, 2), bty = "n", cex = 1.2, ncol = 2)
+par(new = FALSE)
+#dev.off()
+
+```
+  
+\newpage  
+  
+# Linear Models  
+  
+**First Deployment**
+  
+During the 10-day deployment, the Control sample averaged 30.104 $^\circ C$ ($\pm$ 2.702 $^\circ C$ SD). Average temperatures of the microplastic samples ranged from 29.945 $^\circ C$ (White 15%, $\pm$ 2.490 $^\circ C$ SD) to 30.277 $^\circ C$ (Black 15%, $\pm$ 2.573 $^\circ C$ SD). This represents an change of between -0.159 to 0.173 $^\circ C$. Minimum and maximum temperatures in this deployment would have been problematic for sea turtle embryonic development.  
+  
+```{r avg_temp_comparison1, echo = FALSE}
+
+finalTempSummary <- data.frame(Mean = rep(0, 11), SD = rep(0, 11), Min = rep(0, 11), Max = rep(0, 11))
+rownames(finalTempSummary) <- c("Control", "White 5%", "White 10%", "White 15%", "White 25%", "White 30%", "Black 5%", "Black 10%", "Black 15%", 
+                                 "Black 25%", "Black 30%")
+
+for(i in c(3:13)){
+  finalTempSummary[i-2,1] <- round(mean(finalData_Deploy1[,i]), 3)
+  finalTempSummary[i-2,2] <- round(sd(finalData_Deploy1[,i]), 3)
+  finalTempSummary[i-2,3] <- round(min(finalData_Deploy1[,i]), 3)
+  finalTempSummary[i-2,4] <- round(max(finalData_Deploy1[,i]), 3)
+}
+
+kable(finalTempSummary, caption = "Temperature summary: Deployment 1")
+
+```
+  
+The differences in temperature relative to the Control by concentration were different for each color of microplastic. In the White samples, the largest average temperature difference was in the 15% sample (-0.159 $^\circ C \pm$ 0.317 $^\circ C$ SD), followed by the 10% (+0.102 $^\circ C \pm$ 0.144 $^\circ C$ SD), and lastly the 5% (+0.026 $^\circ C \pm$ 0.143 $^\circ C$ SD). It is unclear why the White 15% was cooler than the Control while the other White samples were warmer. The Black samples followed the expected pattern with the largest differences in the 15% (+0.173 $^\circ C \pm$ 0.229 $^\circ C$ SD), followed by the 10% (+0.125 $^\circ C \pm$ 0.200 $^\circ C$ SD), and lastly 5% (+0.011 $^\circ C \pm$ 0.118 $^\circ C$ SD). The largest deviations from the Control varied by color and concentration. The largest positive and negative deviations in the 15% samples for the White samples (+0.395 $^\circ C$, -1.038 $^\circ C$), but for the Black samples the largest positive deviation was in the 15% sample (+0.576 $^\circ C$) and the largest negative deviation was in the 10% sample (-0.506 $^\circ C$).  
+  
+```{r avg_temp_comparison2, echo = FALSE}
+
+finalDiffSummary <- data.frame(Mean = rep(0, 11), SD = rep(0, 11), Min = rep(0, 11), Max = rep(0, 11))
+rownames(finalDiffSummary) <- c("Control", "White 5%", "White 10%", "White 15%", "White 25%", "White 30%", "Black 5%", "Black 10%", "Black 15%", 
+                                 "Black 25%", "Black 30%")
+
+for(i in c(3:13)){
+  finalDiffSummary[i-2,1] <- round(mean(finalDiff_Deploy1[,i]), 3)
+  finalDiffSummary[i-2,2] <- round(sd(finalDiff_Deploy1[,i]), 3)
+  finalDiffSummary[i-2,3] <- round(min(finalDiff_Deploy1[,i]), 3)
+  finalDiffSummary[i-2,4] <- round(max(finalDiff_Deploy1[,i]), 3)
+}
+
+kable(finalDiffSummary, caption = "Temperature difference relative to Control: Deployment 1")
+
+```
+  
+\newpage
+  
+**Second Deployment**
+  
+During the 2-week deployment, the Control sample averaged 30.047 $^\circ C$ ($\pm$ 3.088 $^\circ C$ SD). Average temperatures of the microplastic samples ranged from 30.294 $^\circ C$ (White 25%, $\pm$ 3.095 $^\circ C$ SD) to 30.627 $^\circ C$ (Black 30%, $\pm$ 3.176 $^\circ C$ SD). This represents an increase of between 0.247 to 0.580 $^\circ C$. Minimum and maximum temperatures in this deployment would have been problematic for sea turtle embryonic development.  
+  
+```{r avg_temp_comparison3, echo = FALSE}
+
+finalTempSummary2 <- data.frame(Mean = rep(0, 11), SD = rep(0, 11), Min = rep(0, 11), Max = rep(0, 11))
+rownames(finalTempSummary2) <- c("Control", "White 5%", "White 10%", "White 15%", "White 25%", "White 30%", "Black 5%", "Black 10%", "Black 15%", 
+                                 "Black 25%", "Black 30%")
+
+for(i in c(3:13)){
+  finalTempSummary2[i-2,1] <- round(mean(finalData_Deploy2[,i]), 3)
+  finalTempSummary2[i-2,2] <- round(sd(finalData_Deploy2[,i]), 3)
+  finalTempSummary2[i-2,3] <- round(min(finalData_Deploy2[,i]), 3)
+  finalTempSummary2[i-2,4] <- round(max(finalData_Deploy2[,i]), 3)
+}
+
+kable(finalTempSummary2, caption = "Temperature Summary: Deployment 2")
+
+```
+  
+The differences in temperature relative to the Control by concentration were different for each color of microplastic. In the White samples, the largest average temperature difference was in the 30% sample (+0.426 $^\circ C \pm$ 0.365 $^\circ C$ SD), followed by the 25% (+0.246 $^\circ C \pm$ 0.193 $^\circ C$ SD). The Black samples followed the expected pattern with the largest differences in the 30% (+0.580 $^\circ C \pm$ 0.344 $^\circ C$ SD), followed by the 25% (+0.447 $^\circ C \pm$ 0.244 $^\circ C$ SD). The largest deviations from the Control varied by color. The largest positive and negative deviations in the White samples (and in the entire dataset) were in the 30% sample (+1.114 $^\circ C$, -0.947 $^\circ C$), while in the Black 30% samples it was -0.230 $^\circ C$ for negative deviations and 1.330 $^\circ C$ for positive.  
+  
+```{r avg_temp_comparison4, echo = FALSE}
+
+finalDiffSummary2 <- data.frame(Mean = rep(0, 11), SD = rep(0, 11), Min = rep(0, 11), Max = rep(0, 11))
+rownames(finalDiffSummary2) <- c("Control", "White 5%", "White 10%", "White 15%", "White 25%", "White 30%", "Black 5%", "Black 10%", "Black 15%", 
+                                 "Black 25%", "Black 30%")
+
+for(i in c(3:13)){
+  finalDiffSummary2[i-2,1] <- round(mean(finalDiff_Deploy2[,i]), 3)
+  finalDiffSummary2[i-2,2] <- round(sd(finalDiff_Deploy2[,i]), 3)
+  finalDiffSummary2[i-2,3] <- round(min(finalDiff_Deploy2[,i]), 3)
+  finalDiffSummary2[i-2,4] <- round(max(finalDiff_Deploy2[,i]), 3)
+}
+
+kable(finalDiffSummary2, caption = "Temperature difference relative to Control: Deployment 2")
+
+```
+  
+\newpage
+  
+## Hypothesis Testing and AIC Comparisons  
+  
+The data was reorganized to include Color and Concentration as factor related to each temperature observation for each time-step. The time-step was reduced from every 30 minutes to daily. The sand temperature, air temperature, and solar radiation were averaged to a single daily value and the cumulative rainfall per day was used. The effects of these variables were evaluated in a gaussian linear model with the form:  
+  
+$Temp_{sand} = \beta_0 + \beta_1Temp_{air} + \beta_2Rad_{solar} + \beta_3Temp_{air}:Rad_{solar} + \beta_4Rain + \beta_5Color + \beta_6Concentration + \beta_7Color:Conc + \epsilon$  
+  
+with all numerical explanatory variables scaled to a mean of 0 and a standard deviation of 1 due to the large discrepancies in scale between such variables.  
+  
+Hypothesis testing suggests that each variable and interaction term is significant (p << 0.001) with the exception of Rainfall - which was suggestive at p = 0.058. A stepwise AIC comparison suggests dropping the Color and Color:Concentration interaction term in order to achieve the lowest AIC.  
+  
+```{r temp_comparison_stats_hypothesisTesting}
+
+mMeanTemps_Full <- lm(Sand_Temp ~ scale(Air_Temp) * scale(Solar_Rad) + scale(Rain) + Color * scale(Concentration), data = tsData)
+#summary(mMeanTemps_Full)
+
+mMeanTemps_NoAirRadInt <- lm(Sand_Temp ~ scale(Air_Temp) + scale(Solar_Rad) + scale(Rain) + Color * scale(Concentration), data = tsData)
+anova(mMeanTemps_NoAirRadInt, mMeanTemps_Full, test = "Chisq")
+
+mMeanTemps_NoAir <- lm(Sand_Temp ~ scale(Solar_Rad) + scale(Rain) + Color * scale(Concentration), data = tsData)
+anova(mMeanTemps_NoAir, mMeanTemps_Full, test = "Chisq")
+
+mMeanTemps_NoRad <- lm(Sand_Temp ~ scale(Air_Temp) + scale(Rain) + Color * scale(Concentration), data = tsData)
+anova(mMeanTemps_NoRad, mMeanTemps_Full, test = "Chisq")
+
+mMeanTemps_NoRain <- lm(Sand_Temp ~ scale(Air_Temp) * scale(Solar_Rad) + Color * scale(Concentration), data = tsData)
+anova(mMeanTemps_NoRain, mMeanTemps_Full, test = "Chisq")
+
+mMeanTemps_NoColorConcInt <- lm(Sand_Temp ~ scale(Air_Temp) + scale(Solar_Rad) + scale(Rain) + Color + scale(Concentration), data = tsData)
+anova(mMeanTemps_NoColorConcInt, mMeanTemps_Full, test = "Chisq")
+
+mMeanTemps_NoColor <- lm(Sand_Temp ~ scale(Air_Temp) + scale(Solar_Rad) + scale(Rain) + scale(Concentration), data = tsData)
+anova(mMeanTemps_NoColor, mMeanTemps_Full, test = "Chisq")
+
+mMeanTemps_NoConc <- lm(Sand_Temp ~ scale(Air_Temp) + scale(Solar_Rad) + scale(Rain) + Color, data = tsData)
+anova(mMeanTemps_NoConc, mMeanTemps_Full, test = "Chisq")
+
+```
+  
+\newpage
+  
+Stepwise AIC ...  
+  
+```{r temp_comparison_stats_AIC}
+
+MASS::stepAIC(mMeanTemps_Full)
+
+```
+  
+\newpage
+  
+Based on the reduced model, experimental daily sand temperature equals ...  
+  
+$Temp_{sand} = 30.340 + 0.708Temp_{air} + 0.333Rad_{solar} - 0.364Temp_{air}:Rad_{solar} -0.114Rain + 0.220Concentration$  
+  
+where air temperature ($Temp_{air}$) is in $^\circ C$, average solar radiation ($Rad_{solar}$) is in W m^-2^, $Rain$ is in cm, and $Concentration$ is microplastic percent concentration by volume.  
+  
+To calculate the standardized value, use the following formula:  
+  
+$X_{std} = \frac{X_{raw} - Center}{Scale}$  
+  
+```{r temp_comparison_finalmodel}
+
+mMeanTemps_Final <- lm(Sand_Temp ~ scale(Air_Temp) * scale(Solar_Rad) + scale(Rain) + scale(Concentration), data = tsData)
+summary(mMeanTemps_Final)
+
+scaled_AirTemp <- scale(tsData$Air_Temp)
+scaled_SolarRad <- scale(tsData$Solar_Rad)
+scaled_Rain <- scale(tsData$Rain)
+scaled_Conc <- scale(tsData$Concentration)
+paste0("Air Temperature adjustments: scale - ", round(attr(scaled_AirTemp, "scaled:scale"), 3), 
+       ", center - ", round(attr(scaled_AirTemp, "scaled:center"), 3))
+paste0("Solar Radiation adjustments: scale - ", round(attr(scaled_SolarRad, "scaled:scale"), 3), 
+       ", center - ", round(attr(scaled_SolarRad, "scaled:center"), 3))
+paste0("Rain adjustments: scale - ", round(attr(scaled_Rain, "scaled:scale"), 3), 
+       ", center - ", round(attr(scaled_Rain, "scaled:center"), 3))
+paste0("Concentration adjustments: scale - ", round(attr(scaled_Conc, "scaled:scale"), 3), ", center - ", 
+       round(attr(scaled_Conc, "scaled:center"), 3))
+
+```
+  
+\newpage
+  
+A 1% increase in microplastic concentrations increased temperature by 0.017 deg C relative to the Control.  
+  
+```{r model_plots, echo = FALSE, fig.width = 7, fig.height = 5}
+
+#plot(tsData$Color, tsData$Sand_Temp, xlab = "Color", ylab = "Sand Temperature (\u00B0CC)", main = "")
+
+mTempConc_Predict <- predict(lm(Sand_Temp ~ scale(Concentration), data = tsData), 
+                             newdata = list(Concentration = seq(from = 0, to = 30, by = 0.5)), se.fit = TRUE)
+
+#windows(7,5)
+#jpeg("SandTempbyConc.jpg", width = 7, height = 5, units = "in", res = 300)
+
+par(mfrow = c(1, 1), family = "serif", mar = c(4.5, 6.5, 3, 0.5), bty = "n", las = 1, cex.axis = 1.2, cex.lab = 1.3)
+
+plot(jitter(tsData$Concentration, 0.5), tsData$Sand_Temp, xlab = "Microplastic Concentration (%)", 
+     ylab = "Daily Mean\nSand Temperature (\u00B0C)", main = "", pch = 16, col = rgb(125, 125, 125, alpha = 240, maxColorValue = 255))
+lines(seq(from = 0, to = 30, by = 0.5), mTempConc_Predict$fit, col = "red", lwd = 2)
+lines(seq(from = 0, to = 30, by = 0.5), mTempConc_Predict$fit + 1.96*mTempConc_Predict$se.fit, col = "red", lty = 2, lwd = 2)
+lines(seq(from = 0, to = 30, by = 0.5), mTempConc_Predict$fit - 1.96*mTempConc_Predict$se.fit, col = "red", lty = 2, lwd = 2)
+legend("topleft", legend = c("Mean", "95% CI"), col = c("red", "red"), lty = c(1, 2), lwd = c(2, 2), cex = 1.2, bty = "n")
+#dev.off()
+
+
+```
+  
+\newpage
+  
+## Model Fits  
+  
+**Reduced Model**  
+  
+Despite explaining 70.8% of the observed sand temperature variation, the reduced model still has significant unexplained variation as noted by the residual plots.  
+  
+```{r temp_comparison_finalmodel_plot, fig.width = 7, fig.height = 5}
+
+DHARMa::simulateResiduals(mMeanTemps_Final, n = 5000, plot = TRUE)
+
+```
+  
+\newpage
+  
+**Full Model**  
+  
+Despite explaining 70.8% of the observed sand temperature variation, the full model also has significant unexplained variation as noted by the residual plots. It is unclear if this is related to missing variables, study design, or instrumentation. Replication of this study methodology in both controlled and natural settings is recommended.  
+  
+```{r temp_comparison_fulllmodel_plot, fig.width = 7, fig.height = 5}
+
+DHARMa::simulateResiduals(mMeanTemps_Full, n = 5000, plot = TRUE)
+
+```
+  
+\newpage  
+  
+# Research Answers  
+  
+1) How does the concentration of microplastic impact the retention of heat in silicate sands at average loggerhead sea turtle nest chamber depths?  
+  
+A 1% increase in microplastic concentration increased daily mean sand temperature by 0.017 degrees C.  
+  
+2) How does the color of microplastic impact the retention of heat in silicate sands at average loggerhead sea turtle nest chamber depths?  
+  
+The effect of microplastic color on daily mean sand temperature was questionable. This may have been due to the experimental design where the microplastics were mixed throughout the drums, instrumentation choice, or other unforeseen factors (note unexplained variance in plots above). Further studies should evaluate how the vertical distribution of microplastics impact sand temperature, as well as if there is an interaction with color and vertical distribution, using more sensitive data loggers and better replicate study design.  
+  
+\newpage
+  
+# References  
+  
+```{r r_session_info, R.options = list(width = 60)}
+
+report(sessionInfo()) # Reports the citation information for the packages used in this analysis
+
+```
+  
