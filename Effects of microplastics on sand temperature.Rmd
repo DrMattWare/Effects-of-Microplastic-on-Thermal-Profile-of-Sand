@@ -69,10 +69,10 @@ library(report)
 ```
 ```{r data, message = FALSE}
 
-tempData <- read.csv("Supp Mat - Beckwith Temp Data v1.csv", header = TRUE)
+tempData <- read.csv("Temp Data v1.csv", header = TRUE)
 tempData$Date.Time <- as.POSIXct(tempData$Date.Time, format = "%m/%d/%Y %H:%M")
 
-tsData <- read.csv("Supp Mat - Beckwith Temp Data v2.csv", header = TRUE)
+tsData <- read.csv("Temp Data v2.csv", header = TRUE)
 tsData$Date <- as.POSIXct(tsData$Date, format = "%m/%d/%Y")
 
 ```
